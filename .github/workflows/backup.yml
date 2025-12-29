@@ -1,0 +1,262 @@
+name: Backup
+
+# Melhor prática: Executar diariamente às 2AM
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 2AM UTC
+  workflow_dispatch:  # Permite execução manual
+    inputs:
+      confirm:
+        description: 'Confirm backup? (Type "yes")'
+        required: true
+        type: string
+
+# Melhor prática: Manter apenas um backup em andamento
+concurrency:
+  group: backup
+  cancel-in-progress: false
+
+jobs:
+  # Job 1: Backup Neo4j
+  backup-neo4j:
+    name: Backup Neo4j
+    runs-on: self-hosted  # ✅ Roda na sua máquina local
+    timeout-minutes: 30
+    environment:
+      name: backup
+      url: http://localhost:30474
+    
+    steps:
+      - name: Verify K3S connection
+        run: |
+          # Melhor prática: verificar se K3S está rodando
+          export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+          
+          if ! k3s kubectl cluster-info; then
+            echo "❌ ERROR: K3S is not running!"
+            exit 1
+          fi
+          
+          echo "✅ K3S is running"
+
+      - name: Create backup directory
+        run: |
+          # Melhor prática: criar diretório de backup
+          BACKUP_DIR="/mnt/container-data/backups/neo4j"
+          mkdir -p $BACKUP_DIR
+          
+          echo "✅ Backup directory: $BACKUP_DIR"
+
+      - name: Backup Neo4j database
+        run: |
+          # Melhor prática: backup do Neo4j
+          export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+          
+          DATE=$(date +%Y%m%d_%H%M%S)
+          BACKUP_DIR="/mnt/container-data/backups/neo4j"
+          NEO4J_POD=$(k3s kubectl get pods -n neo4j-langraph -l app=neo4j -o jsonpath='{.items[0].metadata.name}')
+          
+          echo "📦 Backing up Neo4j..."
+          echo "   Pod: $NEO4J_POD"
+          echo "   Date: $DATE"
+          echo "   Directory: $BACKUP_DIR"
+          
+          # Executar backup
+          k3s kubectl exec -n neo4j-langraph $NEO4J_POD -- \
+            neo4j-admin backup --from=/data --to=/backup/neo4j_$DATE
+          
+          echo "✅ Neo4j backup completed: neo4j_$DATE"
+
+      - name: Verify backup integrity
+        run: |
+          # Melhor prática: verificar integridade do backup
+          export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+          
+          NEO4J_POD=$(k3s kubectl get pods -n neo4j-langraph -l app=neo4j -o jsonpath='{.items[0].metadata.name}')
+          
+          # Verificar se backup foi criado
+          LATEST_BACKUP=$(k3s kubectl exec -n neo4j-langraph $NEO4J_POD -- \
+            ls -t /backup/ | head -1)
+          
+          if [ -z "$LATEST_BACKUP" ]; then
+            echo "❌ ERROR: No backup found!"
+            exit 1
+          fi
+          
+          echo "✅ Latest backup: $LATEST_BACKUP"
+          
+          # Verificar tamanho (mínimo 10MB)
+          BACKUP_SIZE=$(k3s kubectl exec -n neo4j-langraph $NEO4J_POD -- \
+            du -m /backup/$LATEST_BACKUP | cut -f1)
+          
+          if [ $BACKUP_SIZE -lt 10 ]; then
+            echo "❌ ERROR: Backup too small (${BACKUP_SIZE}MB)"
+            exit 1
+          fi
+          
+          echo "✅ Backup size: ${BACKUP_SIZE}MB"
+
+      - name: Copy backup to host
+        run: |
+          # Melhor prática: copiar backup do pod para o host
+          export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+          
+          NEO4J_POD=$(k3s kubectl get pods -n neo4j-langraph -l app=neo4j -o jsonpath='{.items[0].metadata.name}')
+          LATEST_BACKUP=$(k3s kubectl exec -n neo4j-langraph $NEO4J_POD -- \
+            ls -t /backup/ | head -1)
+          HOST_BACKUP_DIR="/mnt/container-data/backups/neo4j"
+          
+          # Criar diretório no host
+          mkdir -p $HOST_BACKUP_DIR
+          
+          # Copiar backup do pod para o host
+          k3s kubectl cp neo4j-langraph/$NEO4J_POD:/backup/$LATEST_BACKUP \
+            $HOST_BACKUP_DIR/$LATEST_BACKUP
+          
+          echo "✅ Backup copied to host: $HOST_BACKUP_DIR/$LATEST_BACKUP"
+
+      - name: Clean old backups
+        run: |
+          # Melhor prática: manter apenas os últimos 7 dias
+          HOST_BACKUP_DIR="/mnt/container-data/backups/neo4j"
+          
+          echo "🧹 Cleaning old backups (older than 7 days)..."
+          
+          # Deletar backups antigos
+          find $HOST_BACKUP_DIR -name "neo4j_*" -mtime +7 -delete
+          
+          # Listar backups restantes
+          BACKUP_COUNT=$(find $HOST_BACKUP_DIR -name "neo4j_*" | wc -l)
+          BACKUP_SIZE=$(du -sh $HOST_BACKUP_DIR | cut -f1)
+          
+          echo "✅ Clean up completed!"
+          echo "   Backups: $BACKUP_COUNT"
+          echo "   Total size: $BACKUP_SIZE"
+
+      - name: Create backup report
+        run: |
+          # Melhor prática: gerar relatório de backup
+          HOST_BACKUP_DIR="/mnt/container-data/backups/neo4j"
+          
+          LATEST_BACKUP=$(ls -t $HOST_BACKUP_DIR/neo4j_* | head -1)
+          BACKUP_SIZE=$(du -m $LATEST_BACKUP | cut -f1)
+          BACKUP_COUNT=$(find $HOST_BACKUP_DIR -name "neo4j_*" | wc -l)
+          TOTAL_SIZE=$(du -sh $HOST_BACKUP_DIR | cut -f1)
+          
+          cat > backup-report.txt << 'EOF'
+          ====================
+          BACKUP REPORT
+          ====================
+          
+          Date: $(date)
+          Latest backup: $(basename $LATEST_BACKUP)
+          Backup size: ${BACKUP_SIZE}MB
+          Total backups: $BACKUP_COUNT
+          Total size: $TOTAL_SIZE
+          Retention: 7 days
+          ====================
+          EOF
+          
+          cat backup-report.txt
+
+      - name: Upload backup report
+        uses: actions/upload-artifact@v3
+        with:
+          name: backup-report
+          path: backup-report.txt
+          retention-days: 90
+
+      - name: Notify on success
+        if: success()
+        run: |
+          echo "🎉 BACKUP SUCCESSFUL!"
+          echo "📦 Latest backup saved"
+          echo "📊 Old backups cleaned up"
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ BACKUP FAILED!"
+          echo "💡 Check logs:"
+          echo "   k3s kubectl logs deployment/neo4j -n neo4j-langraph"
+          echo "   k3s kubectl describe pod -n neo4j-langraph"
+
+  # Job 2: Backup LocalAI Models
+  backup-localai:
+    name: Backup LocalAI Models
+    runs-on: self-hosted  # ✅ Roda na sua máquina local
+    timeout-minutes: 15
+    
+    steps:
+      - name: Verify K3S connection
+        run: |
+          export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+          
+          if ! k3s kubectl cluster-info; then
+            echo "❌ ERROR: K3S is not running!"
+            exit 1
+          fi
+          
+          echo "✅ K3S is running"
+
+      - name: Backup LocalAI models
+        run: |
+          # Melhor prática: backup dos modelos LocalAI
+          export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+          
+          DATE=$(date +%Y%m%d_%H%M%S)
+          BACKUP_DIR="/mnt/container-data/backups/localai"
+          LOCALAI_POD=$(k3s kubectl get pods -n neo4j-langraph -l app=localai -o jsonpath='{.items[0].metadata.name}')
+          
+          echo "📦 Backing up LocalAI models..."
+          echo "   Pod: $LOCALAI_POD"
+          echo "   Date: $DATE"
+          
+          # Criar diretório de backup
+          mkdir -p $BACKUP_DIR
+          
+          # Listar modelos
+          MODELS=$(k3s kubectl exec -n neo4j-langraph $LOCALAI_POD -- \
+            ls /models/ 2>/dev/null || echo "")
+          
+          if [ -z "$MODELS" ]; then
+            echo "⚠️  No models found in LocalAI"
+            exit 0
+          fi
+          
+          # Copiar modelos
+          for MODEL in $MODELS; do
+            k3s kubectl cp neo4j-langraph/$LOCALAI_POD:/models/$MODEL \
+              $BACKUP_DIR/${MODEL}_$DATE
+            echo "   ✅ Backed up: $MODEL"
+          done
+          
+          echo "✅ LocalAI models backup completed"
+
+      - name: Create LocalAI backup report
+        if: always()
+        run: |
+          BACKUP_DIR="/mnt/container-data/backups/localai"
+          MODEL_COUNT=$(find $BACKUP_DIR -type f | wc -l)
+          TOTAL_SIZE=$(du -sh $BACKUP_DIR 2>/dev/null | cut -f1 || echo "0B")
+          
+          cat > localai-backup-report.txt << 'EOF'
+          ====================
+          LOCALAI BACKUP REPORT
+          ====================
+          
+          Date: $(date)
+          Models: $MODEL_COUNT
+          Total size: $TOTAL_SIZE
+          ====================
+          EOF
+          
+          cat localai-backup-report.txt
+
+      - name: Upload LocalAI backup report
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: localai-backup-report
+          path: localai-backup-report.txt
+          retention-days: 90

@@ -1,0 +1,72 @@
+name: Deploy to K3S
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        type: choice
+        options:
+          - production
+          - staging
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'production' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.29.0'
+
+      - name: Create KUBECONFIG file
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Verify cluster connection
+        run: |
+          kubectl cluster-info
+          kubectl get nodes
+
+      - name: Apply Kubernetes manifests
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/secrets/
+          kubectl apply -f k8s/neo4j/
+          kubectl apply -f k8s/localai/
+
+      - name: Verify deployments
+        run: |
+          kubectl rollout status deployment/neo4j -n neo4j-langraph --timeout=300s
+          kubectl rollout status deployment/localai -n neo4j-langraph --timeout=300s
+
+      - name: Verify pods
+        run: |
+          kubectl get pods -n neo4j-langraph
+
+      - name: Verify services
+        run: |
+          kubectl get svc -n neo4j-langraph
+
+      - name: Run smoke tests
+        run: |
+          # Test Neo4j connection
+          kubectl run -n neo4j-langraph --rm -i --restart=Never --image=neo4j:4.4-community \
+            -- cypher-shell -a bolt://neo4j:7687 -u neo4j -p password "RETURN 1 AS num"
+          
+          # Test LocalAI connection
+          kubectl run -n neo4j-langgraph --rm -i --restart=Never --image=curlimages/curl:latest \
+            -- curl -f http://localai:8080/health

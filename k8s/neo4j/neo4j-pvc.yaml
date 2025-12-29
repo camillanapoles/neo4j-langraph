@@ -1,0 +1,14 @@
+# PVC para Neo4j (vinculado ao PV manual neo4j-data-pv)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: neo4j-data-pvc
+  namespace: neo4j-langraph
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: local-path
+  volumeName: neo4j-data-pv

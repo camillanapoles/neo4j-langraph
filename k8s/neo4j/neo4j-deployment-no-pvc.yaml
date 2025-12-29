@@ -1,0 +1,69 @@
+# Deployment do Neo4j (SEM PVC - para testar se funciona)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: neo4j-test
+  namespace: neo4j-langraph
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: neo4j-test
+  template:
+    metadata:
+      labels:
+        app: neo4j-test
+    spec:
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+      containers:
+      - name: neo4j
+        image: docker.io/neo4j:5.23-community
+        ports:
+        - containerPort: 7474
+          name: http
+        - containerPort: 7687
+          name: bolt
+        env:
+        - name: NEO4J_AUTH
+          value: "neo4j/password"
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        - name: logs
+          mountPath: /logs
+        - name: plugins
+          mountPath: /plugins
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+      volumes:
+      - name: data
+        emptyDir: {}
+      - name: logs
+        emptyDir: {}
+      - name: plugins
+        emptyDir: {}
+---
+# Service do Neo4j (TESTE)
+apiVersion: v1
+kind: Service
+metadata:
+  name: neo4j-test
+  namespace: neo4j-langraph
+spec:
+  type: ClusterIP
+  selector:
+    app: neo4j-test
+  ports:
+  - name: http
+    port: 7474
+    targetPort: 7474
+  - name: bolt
+    port: 7687
+    targetPort: 7687

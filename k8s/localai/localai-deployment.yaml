@@ -1,0 +1,79 @@
+# ConfigMap para LocalAI
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: localai-config
+  namespace: neo4j-langraph
+data:
+  MODELS_PATH: "/models"
+  IMAGE: "quay.io/go-skynet/local-ai:latest-cublas-cuda12"
+  THREADS: "4"
+  DEBUG: "true"
+---
+# PVC para modelos
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: localai-models-pvc
+  namespace: neo4j-langraph
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: local-path
+---
+# Deployment do LocalAI (com GPU)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: localai
+  namespace: neo4j-langraph
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: localai
+  template:
+    metadata:
+      labels:
+        app: localai
+    spec:
+      containers:
+      - name: localai
+        image: quay.io/go-skynet/local-ai:latest-cublas-cuda12
+        ports:
+        - containerPort: 8080
+          name: http
+        envFrom:
+        - configMapRef:
+            name: localai-config
+        volumeMounts:
+        - name: models
+          mountPath: /models
+        resources:
+          limits:
+            nvidia.com/gpu: 1
+          requests:
+            memory: "4Gi"
+      volumes:
+      - name: models
+        persistentVolumeClaim:
+          claimName: localai-models-pvc
+---
+# Service do LocalAI
+apiVersion: v1
+kind: Service
+metadata:
+  name: localai
+  namespace: neo4j-langraph
+spec:
+  type: NodePort
+  selector:
+    app: localai
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+    nodePort: 30808

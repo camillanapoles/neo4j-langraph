@@ -1,0 +1,127 @@
+# ConfigMap para Neo4j
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: neo4j-config
+  namespace: neo4j-langraph
+data:
+  NEO4J_dbms_memory_pagecache_size: "512M"
+  NEO4J_dbms_memory_heap_initial__size: "256M"
+  NEO4J_dbms_memory_heap_max__size: "256M"
+  NEO4J_dbms_security_procedures_unrestricted: "apoc.*"
+  NEO4J_dbms_security_procedures_allowlist: "apoc.*"
+---
+# Secret para Neo4j
+apiVersion: v1
+kind: Secret
+metadata:
+  name: neo4j-secret
+  namespace: neo4j-langraph
+type: Opaque
+stringData:
+  NEO4J_AUTH: "neo4j/password"
+---
+# PVC para dados do Neo4j
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: neo4j-data-pvc
+  namespace: neo4j-langraph
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: local-path
+---
+# Deployment do Neo4j
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: neo4j
+  namespace: neo4j-langraph
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: neo4j
+  template:
+    metadata:
+      labels:
+        app: neo4j
+    spec:
+      containers:
+      - name: neo4j
+        image: docker.io/neo4j:5.26-community
+        ports:
+        - containerPort: 7474
+          name: http
+        - containerPort: 7687
+          name: bolt
+        envFrom:
+        - configMapRef:
+            name: neo4j-config
+        - secretRef:
+            name: neo4j-secret
+        volumeMounts:
+        - name: neo4j-data
+          mountPath: /data
+        - name: neo4j-logs
+          mountPath: /logs
+        - name: neo4j-plugins
+          mountPath: /plugins
+        livenessProbe:
+          exec:
+            command:
+            - cypher-shell
+            - -u
+            - neo4j
+            - -p
+            - password
+            - "RETURN 1"
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - cypher-shell
+            - -u
+            - neo4j
+            - -p
+            - password
+            - "RETURN 1"
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+      volumes:
+      - name: neo4j-data
+        persistentVolumeClaim:
+          claimName: neo4j-data-pvc
+      - name: neo4j-logs
+        emptyDir: {}
+      - name: neo4j-plugins
+        emptyDir: {}
+---
+# Service do Neo4j (NodePort para acesso local)
+apiVersion: v1
+kind: Service
+metadata:
+  name: neo4j
+  namespace: neo4j-langraph
+spec:
+  type: NodePort
+  selector:
+    app: neo4j
+  ports:
+  - name: http
+    port: 7474
+    targetPort: 7474
+    nodePort: 30474
+  - name: bolt
+    port: 7687
+    targetPort: 7687
+    nodePort: 30687

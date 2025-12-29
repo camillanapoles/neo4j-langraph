@@ -1,0 +1,218 @@
+name: Tests
+
+# Triggers
+on:
+  push:
+    branches: [main, dev, staging]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'requirements.txt'
+      - '.github/workflows/test.yml'
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+# Melhor prática: Cancelar workflows antigos
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Job 1: Linting (rápido, detecta problemas logo)
+  lint:
+    name: Linting
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Melhor prática: fetch all history
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'  # Melhor prática: cache pip
+
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install flake8 mypy black
+
+      - name: Run flake8
+        run: |
+          flake8 src/ tests/ --max-line-length=100 --extend-ignore=E203,W503
+
+      - name: Run mypy
+        run: |
+          mypy src/ --ignore-missing-imports --warn-return-any
+
+      - name: Check formatting with black
+        run: |
+          black --check src/ tests/
+
+      - name: Run security checks
+        run: |
+          pip install bandit
+          bandit -r src/ -f json -o bandit-report.json || true
+        continue-on-error: true  # Não falhar o build, só reportar
+
+      - name: Upload security report
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: bandit-report
+          path: bandit-report.json
+
+  # Job 2: Unit Tests (matrix testing)
+  unit-tests:
+    name: Unit Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: lint  # Melhor prática: depende do lint
+    
+    strategy:
+      fail-fast: false  # Melhor prática: não falhar rápido
+      matrix:
+        python-version: ['3.9', '3.10', '3.11']
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: |
+          pytest tests/unit/ -v --tb=short --cov=src/ --cov-report=xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        if: matrix.python-version == '3.10'  # Apenas uma versão
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
+
+  # Job 3: Integration Tests
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [lint, unit-tests]
+    
+    services:
+      # Neo4j para testes
+      neo4j:
+        image: neo4j:4.4-community
+        env:
+          NEO4J_AUTH: neo4j/testpassword
+        ports:
+          - 7474:7474
+          - 7687:7687
+        options: >-
+          --health-cmd "curl -f http://localhost:7474"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Wait for Neo4j
+        run: |
+          for i in {1..30}; do
+            if curl -f http://localhost:7474; then
+              echo "Neo4j is ready!"
+              break
+            fi
+            echo "Waiting for Neo4j... ($i/30)"
+            sleep 2
+          done
+
+      - name: Run integration tests
+        env:
+          NEO4J_URI: bolt://localhost:7687
+          NEO4J_USERNAME: neo4j
+          NEO4J_PASSWORD: testpassword
+        run: |
+          pytest tests/integration/ -v --tb=short
+
+  # Job 4: End-to-End Tests
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: integration-tests
+    
+    services:
+      neo4j:
+        image: neo4j:4.4-community
+        env:
+          NEO4J_AUTH: neo4j/testpassword
+        ports:
+          - 7474:7474
+          - 7687:7687
+        options: >-
+          --health-cmd "curl -f http://localhost:7474"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Wait for Neo4j
+        run: |
+          for i in {1..30}; do
+            if curl -f http://localhost:7474; then
+              echo "Neo4j is ready!"
+              break
+            fi
+            echo "Waiting for Neo4j... ($i/30)"
+            sleep 2
+          done
+
+      - name: Run E2E tests
+        env:
+          NEO4J_URI: bolt://localhost:7687
+          NEO4J_USERNAME: neo4j
+          NEO4J_PASSWORD: testpassword
+        run: |
+          pytest tests/e2e/ -v --tb=short

@@ -1,0 +1,77 @@
+# PersistentVolume para Neo4j (usando /mnt/container-data/projects/neo4j-langraph/neo4j)
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: neo4j-data-pv
+  namespace: neo4j-langraph
+spec:
+  capacity:
+    storage: 5Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-path
+  local:
+    path: /mnt/container-data/projects/neo4j-langraph/neo4j
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - pop-os.local
+---
+# PVC para Neo4j
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: neo4j-data-pvc
+  namespace: neo4j-langraph
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: local-path
+  volumeName: neo4j-data-pv
+---
+# PersistentVolume para Modelos LocalAI (usando /mnt/container-data/projects/neo4j-langraph/models)
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: localai-models-pv
+  namespace: neo4j-langraph
+spec:
+  capacity:
+    storage: 20Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-path
+  local:
+    path: /mnt/container-data/projects/neo4j-langraph/models
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - pop-os.local
+---
+# PVC para Modelos LocalAI
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: localai-models-pvc
+  namespace: neo4j-langraph
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: local-path
+  volumeName: localai-models-pv

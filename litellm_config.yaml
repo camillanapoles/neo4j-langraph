@@ -1,0 +1,82 @@
+model_list:
+  # ================================
+  # MODELO PRIMÁRIO: Gemini Flash 2.5
+  # ================================
+  - model_name: gemini-flash
+    litellm_params:
+      model: gemini/gemini-2.0-flash-exp
+      api_key: os.environ/GOOGLE_API_KEY
+      max_tokens: 4096
+      temperature: 0.7
+
+  # ================================
+  # MODELO SECUNDÁRIO: LocalAI (llama3.2:3b)
+  # ================================
+  - model_name: localai-llama
+    litellm_params:
+      model: localai/llama3.2:3b
+      api_base: http://localhost:30808/v1
+      api_key: os.environ/LOCALAI_API_KEY
+      max_tokens: 2048
+      temperature: 0.7
+
+# ================================
+# ROTEADOR
+# ================================
+router_settings:
+  # Grupo de modelos para roteamento
+  model_group:
+    primary-models:
+      - gemini-flash
+      - localai-llama
+
+  # Estratégia de roteamento
+  # Opções: 'usage-based-routing', 'latency-based-routing', 'simple-shuffle'
+  routing_strategy: ["usage-based-routing"]
+
+  # Modelo de fallback (se todos falharem)
+  fallback_model: localai-llama
+
+  # Tentar N vezes antes de fallback
+  num_retries: 2
+
+  # Timeout (segundos)
+  timeout: 60
+
+  # Fallback se modelo não responder
+  # Opções: 'fallback_to_secondary_model', 'raise_error'
+  set_fallbacks:
+    - gemini-flash: localai-llama
+
+# ================================
+# CONFIGURAÇÕES GERAIS
+# ================================
+general_settings:
+  # Logging
+  master_key: os.environ/LITELM_MASTER_KEY
+
+  # Rate limiting
+  rpm_limit: 60  # Requests por minuto (total)
+
+  # Batch size (para múltiplos requests)
+  max_batch_size: 10
+
+  # Fallback se erro 429 (cota excedida)
+  # 'fallback_to_secondary_model' ou 'raise_error'
+  fallback_on_rate_limit: true
+
+# ================================
+# CONFIGURAÇÕES DE SEGURANÇA
+# ================================
+litellm_settings:
+  # Drop parâmetros não suportados
+  drop_params: true
+
+  # Verificar API keys antes de enviar
+  validate_api_keys: false
+
+  # Logging detalhado
+  set_verbose: false
+
+  # Debug mode
+  debug: false

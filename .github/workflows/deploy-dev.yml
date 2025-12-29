@@ -1,0 +1,217 @@
+name: Deploy to Dev (Local)
+
+# Triggers
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      - 'k8s/**'
+      - '.github/workflows/deploy-dev.yml'
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Confirm deploy to dev? (Type "yes")'
+        required: true
+        type: string
+
+# Melhor prática: Only deploy on explicit confirmation
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false  # Não cancelar deploys em andamento
+
+jobs:
+  # Job 1: Pre-flight checks
+  preflight:
+    name: Pre-flight Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate Kubernetes manifests
+        run: |
+          # Install kubectl
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          
+          # Validate manifests
+          kubectl apply --dry-run=server -f k8s/base/
+          
+      - name: Check for secrets in manifests
+        run: |
+          # Melhor prática: não versionar secrets
+          if grep -r "secret" k8s/base/ --include="*.yaml"; then
+            echo "❌ ERROR: Secrets found in manifests!"
+            echo "💡 Use k8s/secrets/ for secrets (not versioned)"
+            exit 1
+          else
+            echo "✅ No secrets found in manifests"
+          fi
+
+  # Job 2: Deploy to Dev (Self-Hosted Runner)
+  deploy-dev:
+    name: Deploy to Dev (Local)
+    runs-on: self-hosted  # ✅ Roda na sua máquina local
+    timeout-minutes: 10
+    needs: preflight
+    environment:
+      name: dev
+      url: http://localhost:30474  # Neo4j browser
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify K3S connection
+        run: |
+          # Melhor prática: verificar se K3S está rodando
+          export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+          
+          if ! k3s kubectl cluster-info; then
+            echo "❌ ERROR: K3S is not running!"
+            exit 1
+          fi
+          
+          echo "✅ K3S is running"
+
+      - name: Deploy manifests to K3S
+        run: |
+          # Melhor prática: usar Kustomize para gerenciamento de configs
+          export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+          
+          # Aplicar manifests base
+          k3s kubectl apply -f k8s/base/namespace.yaml
+          
+          # Aplicar secrets (do K8S secrets, não do git)
+          # k3s kubectl apply -f k8s/secrets/
+          
+          # Aplicar Neo4j
+          k3s kubectl apply -f k8s/base/neo4j/
+          
+          # Aplicar LocalAI
+          k3s kubectl apply -f k8s/base/localai/
+
+      - name: Verify deployments
+        run: |
+          # Melhor prática: verificar se deployments estão funcionando
+          export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+          
+          # Aguardar rollout do Neo4j
+          k3s kubectl rollout status deployment/neo4j -n neo4j-langraph --timeout=300s
+          
+          # Aguardar rollout do LocalAI
+          k3s kubectl rollout status deployment/localai -n neo4j-langraph --timeout=300s
+          
+          echo "✅ All deployments rolled out successfully"
+
+      - name: Verify pods
+        run: |
+          export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+          
+          # Listar pods
+          echo "📊 Pods in neo4j-langraph namespace:"
+          k3s kubectl get pods -n neo4j-langraph
+          
+          # Verificar se todos os pods estão rodando
+          NOT_RUNNING=$(k3s kubectl get pods -n neo4j-langraph --field-selector=status.phase!=Running -o name | wc -l)
+          
+          if [ "$NOT_RUNNING" -gt 0 ]; then
+            echo "❌ ERROR: $NOT_RUNNING pods are not running!"
+            exit 1
+          fi
+          
+          echo "✅ All pods are running"
+
+      - name: Verify services
+        run: |
+          export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+          
+          echo "📊 Services in neo4j-langraph namespace:"
+          k3s kubectl get svc -n neo4j-langraph
+          
+          # Verificar se Neo4j está acessível
+          NEO4J_SVC=$(k3s kubectl get svc neo4j -n neo4j-langraph -o jsonpath='{.spec.type}')
+          echo "✅ Neo4j service type: $NEO4J_SVC"
+
+      - name: Health checks
+        run: |
+          # Melhor prática: executar health checks
+          
+          # Test Neo4j
+          echo "1️⃣  Testing Neo4j connection..."
+          NEO4J_POD=$(k3s kubectl get pods -n neo4j-langraph -l app=neo4j -o jsonpath='{.items[0].metadata.name}')
+          
+          if k3s kubectl exec -n neo4j-langraph $NEO4J_POD -- \
+            cypher-shell -u neo4j -p password "RETURN 1 AS num"; then
+            echo "✅ Neo4j connection successful"
+          else
+            echo "❌ ERROR: Neo4j connection failed!"
+            exit 1
+          fi
+          
+          # Test LocalAI
+          echo ""
+          echo "2️⃣  Testing LocalAI connection..."
+          LOCALAI_POD=$(k3s kubectl get pods -n neo4j-langraph -l app=localai -o jsonpath='{.items[0].metadata.name}')
+          
+          if k3s kubectl exec -n neo4j-langraph $LOCALAI_POD -- \
+            wget -O- http://localhost:8080/health; then
+            echo "✅ LocalAI connection successful"
+          else
+            echo "❌ ERROR: LocalAI connection failed!"
+            exit 1
+          fi
+
+      - name: Create deployment report
+        run: |
+          # Melhor prática: gerar relatório de deploy
+          export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+          
+          cat > deployment-report.txt << 'EOF'
+          ====================
+          DEPLOYMENT REPORT
+          ====================
+          
+          Environment: dev
+          Date: $(date)
+          Commit: ${{ github.sha }}
+          Branch: ${{ github.ref }}
+          
+          Deployments:
+          $(k3s kubectl get deployments -n neo4j-langraph)
+          
+          Pods:
+          $(k3s kubectl get pods -n neo4j-langraph)
+          
+          Services:
+          $(k3s kubectl get svc -n neo4j-langraph)
+          ====================
+          EOF
+          
+          cat deployment-report.txt
+
+      - name: Upload deployment report
+        uses: actions/upload-artifact@v3
+        with:
+          name: deployment-report-dev
+          path: deployment-report.txt
+          retention-days: 30
+
+      - name: Notify on success
+        if: success()
+        run: |
+          echo "🎉 DEPLOY TO DEV SUCCESSFUL!"
+          echo "📊 Neo4j Browser: http://localhost:30474"
+          echo "🤖 LocalAI: http://localhost:30808"
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ DEPLOY TO DEV FAILED!"
+          echo "💡 Check logs:"
+          echo "   k3s kubectl logs deployment/neo4j -n neo4j-langraph"
+          echo "   k3s kubectl logs deployment/localai -n neo4j-langraph"

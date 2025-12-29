@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neo4j-langraph"
+version = "0.1.0"
+description = "Sistema de Gerenciamento de Conhecimento com Neo4j e LangChain"
+authors = [
+    {name = "CNMFS"}
+]
+requires-python = ">=3.10"
+dependencies = [
+    "langchain-neo4j>=0.1.0",
+    "langchain-openai>=0.1.0",
+    "langchain-ollama>=0.2.0",
+    "langchain-huggingface>=0.1.0",
+    "langchain-core>=0.1.0",
+    "openai>=1.0.0",
+    "neo4j>=5.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+gpu = [
+    "torch>=2.0.0",
+    "transformers>=4.30.0",
+    "sentence-transformers>=2.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "black>=23.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0",
+]
+
+[project.scripts]
+neo4j-knowledge = "src.cli.knowledge_cli:main"
+neo4j-governance = "src.cli.project_cli:main"
+
+[tool.setuptools]
+packages = ["src"]
+
+[tool.setuptools.package-data]
+src = ["py.typed"]
+
+[tool.black]
+line-length = 100
+target-version = ['py310']
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
