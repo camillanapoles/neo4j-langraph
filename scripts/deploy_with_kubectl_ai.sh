@@ -239,7 +239,7 @@ safe_kubectl_count() {
         # Comando bem-sucedido, mas sem recursos retornados
         echo "0"
     else
-        printf '%s\n' "$output" | wc -l | tr -d ' '
+        printf '%s\n' "$output" | wc -l
     fi
 }
 
