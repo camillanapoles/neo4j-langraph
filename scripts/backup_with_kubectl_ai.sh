@@ -2,9 +2,7 @@
 # Script de backup automatizado com kubectl-ai
 # Backup do Neo4j e LocalAI com verificação de integridade
 
-# Não usar 'set -e' para evitar que erros não críticos interrompam o script inteiro.
-# Comandos críticos devem tratar erros explicitamente (por exemplo, com 'if ! cmd; then exit 1; fi').
-set -o pipefail
+set -eo pipefail  # Fail on errors and pipe errors; use set +e for non-critical operations if needed
 
 echo "📦 BACKUP AUTOMATIZADO COM KUBECTL-AI"
 echo "======================================="
@@ -73,7 +71,7 @@ echo ""
 echo "📁 CRIANDO DIRETÓRIO DE BACKUP"
 echo "-----------------------------------"
 
-# Criar diretório de backup do Neo4j
+# Criar diretório de backup do Neo4j (CRÍTICO - falhar se não conseguir)
 NEO4J_BACKUP_DIR="$BACKUP_DIR/neo4j"
 if ! mkdir -p "$NEO4J_BACKUP_DIR"; then
     echo "❌ ERRO CRÍTICO: Não foi possível criar diretório de backup do Neo4j!"
@@ -81,7 +79,7 @@ if ! mkdir -p "$NEO4J_BACKUP_DIR"; then
 fi
 echo "✅ Diretório de backup do Neo4j: $NEO4J_BACKUP_DIR"
 
-# Criar diretório de backup do LocalAI
+# Criar diretório de backup do LocalAI (CRÍTICO - falhar se não conseguir)
 LOCALAI_BACKUP_DIR="$BACKUP_DIR/localai"
 if ! mkdir -p "$LOCALAI_BACKUP_DIR"; then
     echo "❌ ERRO CRÍTICO: Não foi possível criar diretório de backup do LocalAI!"
@@ -123,18 +121,26 @@ echo "-----------------------------------"
 echo "📊 Verificando se backup foi criado..."
 if [ -f "$NEO4J_BACKUP_DIR/neo4j_$DATE" ]; then
     echo "✅ Backup criado: neo4j_$DATE"
+else
+    echo "⚠️  Aviso: Backup não foi encontrado no caminho esperado: $NEO4J_BACKUP_DIR/neo4j_$DATE"
+    echo "💡 O backup pode ter sido criado com um nome diferente ou em um local diferente."
+fi
+
+echo "📊 Verificando tamanho do backup..."
+BACKUP_SIZE="0"  # Default value
+if [ -f "$NEO4J_BACKUP_DIR/neo4j_$DATE" ]; then
+    BACKUP_SIZE=$(du -m "$NEO4J_BACKUP_DIR/neo4j_$DATE" 2>/dev/null | cut -f1)
     
-    echo "📊 Verificando tamanho do backup..."
-    BACKUP_SIZE=$(du -m "$NEO4J_BACKUP_DIR/neo4j_$DATE" | cut -f1)
-    
-    if [ "$BACKUP_SIZE" -lt 10 ]; then
-        echo "⚠️  AVISO: Backup muito pequeno (${BACKUP_SIZE}MB) - pode estar corrompido!"
-    else
+    if [ -n "$BACKUP_SIZE" ] && [ "$BACKUP_SIZE" -ge 10 ] 2>/dev/null; then
         echo "✅ Backup size: ${BACKUP_SIZE}MB"
+    elif [ -n "$BACKUP_SIZE" ]; then
+        echo "⚠️  Aviso: Backup pode estar muito pequeno (${BACKUP_SIZE}MB)"
+    else
+        BACKUP_SIZE="0"
+        echo "⚠️  Aviso: Não foi possível determinar o tamanho do backup"
     fi
 else
-    echo "⚠️  AVISO: Backup não foi encontrado no diretório esperado!"
-    BACKUP_SIZE=0
+    echo "⚠️  Aviso: Não foi possível verificar o tamanho do backup"
 fi
 
 echo ""
@@ -153,7 +159,7 @@ fi
 
 echo "📦 Iniciando backup dos modelos LocalAI..."
 if ! kubectl-ai --quiet --skip-permissions "Faça backup dos modelos LocalAI no namespace $NAMESPACE: Liste os modelos em /models/ e copie para $LOCALAI_BACKUP_DIR/"; then
-    echo "⚠️  Aviso: Falha ao executar backup do LocalAI, mas continuando com limpeza e relatório..."
+    echo "⚠️  Aviso: Falha ao executar backup dos modelos LocalAI, mas continuando..."
 fi
 
 echo "✅ Backup dos modelos LocalAI concluído!"
@@ -167,7 +173,7 @@ echo ""
 echo "🔍 VERIFICANDO INTEGRIDADE DO BACKUP LOCALAI"
 echo "-----------------------------------"
 
-MODEL_COUNT=$(find "$LOCALAI_BACKUP_DIR" -type f | wc -l)
+MODEL_COUNT=$(find "$LOCALAI_BACKUP_DIR" -type f 2>/dev/null | wc -l)
 
 if [ "$MODEL_COUNT" -eq 0 ]; then
     echo "⚠️  Nenhum modelo encontrado no backup do LocalAI"
@@ -176,7 +182,10 @@ else
     echo "✅ Modelos encontrados: $MODEL_COUNT"
 fi
 
-TOTAL_SIZE=$(du -sh "$LOCALAI_BACKUP_DIR" | cut -f1)
+TOTAL_SIZE=$(du -sh "$LOCALAI_BACKUP_DIR" 2>/dev/null | cut -f1)
+if [ -z "$TOTAL_SIZE" ]; then
+    TOTAL_SIZE="0"
+fi
 echo "✅ Total size: $TOTAL_SIZE"
 
 echo ""
@@ -190,11 +199,11 @@ echo "-----------------------------------"
 
 echo "🧹 Limpando backups do Neo4j (mais antigos que $RETENTION_DAYS dias)..."
 if ! find "$NEO4J_BACKUP_DIR" -name "neo4j_*" -mtime +$RETENTION_DAYS -delete 2>/dev/null; then
-    echo "⚠️  Aviso: Não foi possível limpar alguns backups antigos do Neo4j"
+    echo "⚠️  Aviso: Não foi possível limpar backups antigos do Neo4j, mas continuando..."
 fi
 
 NEO4J_BACKUP_COUNT=$(find "$NEO4J_BACKUP_DIR" -name "neo4j_*" 2>/dev/null | wc -l)
-NEO4J_BACKUP_SIZE=$(du -sh "$NEO4J_BACKUP_DIR" 2>/dev/null | cut -f1 || echo "0")
+NEO4J_BACKUP_SIZE=$(du -sh "$NEO4J_BACKUP_DIR" 2>/dev/null | cut -f1)
 
 echo "✅ Clean up concluído!"
 echo "   Backups: $NEO4J_BACKUP_COUNT"
@@ -203,11 +212,11 @@ echo "   Total size: $NEO4J_BACKUP_SIZE"
 echo ""
 echo "🧹 Limpando backups do LocalAI (mais antigos que $RETENTION_DAYS dias)..."
 if ! find "$LOCALAI_BACKUP_DIR" -name "*_backup" -mtime +$RETENTION_DAYS -delete 2>/dev/null; then
-    echo "⚠️  Aviso: Não foi possível limpar alguns backups antigos do LocalAI"
+    echo "⚠️  Aviso: Não foi possível limpar backups antigos do LocalAI, mas continuando..."
 fi
 
 LOCALAI_BACKUP_COUNT=$(find "$LOCALAI_BACKUP_DIR" -type f 2>/dev/null | wc -l)
-LOCALAI_BACKUP_SIZE=$(du -sh "$LOCALAI_BACKUP_DIR" 2>/dev/null | cut -f1 || echo "0")
+LOCALAI_BACKUP_SIZE=$(du -sh "$LOCALAI_BACKUP_DIR" 2>/dev/null | cut -f1)
 
 echo "✅ Clean up concluído!"
 echo "   Models: $LOCALAI_BACKUP_COUNT"
@@ -222,7 +231,7 @@ echo ""
 echo "📊 GERANDO RELATÓRIO DE BACKUP"
 echo "-----------------------------------"
 
-if ! cat > "$BACKUP_DIR/backup-report.txt" << EOFCAT
+cat > "$BACKUP_DIR/backup-report.txt" << EOFCAT
 ======================================
 BACKUP REPORT
 ======================================
@@ -263,13 +272,11 @@ Total size: $NEO4J_BACKUP_SIZE + $LOCALAI_BACKUP_SIZE
 Status: Success
 ======================================
 EOFCAT
-then
-    echo "⚠️  Aviso: Não foi possível gerar o relatório de backup"
-else
-    cat "$BACKUP_DIR/backup-report.txt"
-    echo ""
-    echo "✅ Relatório de backup gerado: $BACKUP_DIR/backup-report.txt"
-fi
+
+cat "$BACKUP_DIR/backup-report.txt"
+
+echo ""
+echo "✅ Relatório de backup gerado: $BACKUP_DIR/backup-report.txt"
 
 echo ""
 

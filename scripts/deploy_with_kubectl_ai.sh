@@ -4,6 +4,29 @@
 
 set -e  # Parar em caso de erro
 
+# Helper function to safely count kubectl resources
+safe_kubectl_count() {
+    local kind="$1"
+    local ns="$2"
+
+    # Temporarily disable -e to capture failures
+    set +e
+    local output
+    output=$(kubectl get "$kind" -n "$ns" --no-headers 2>/dev/null)
+    local status=$?
+    set -e
+
+    if [ "$status" -ne 0 ]; then
+        # kubectl failed (e.g., namespace doesn't exist or KUBECONFIG invalid)
+        echo "N/A"
+    elif [ -z "$output" ]; then
+        # Command succeeded but returned no resources
+        echo "0"
+    else
+        printf '%s\n' "$output" | wc -l | tr -d ' '
+    fi
+}
+
 echo "🚀 DEPLOY COM KUBECTL-AI"
 echo "======================================="
 echo ""
@@ -219,29 +242,6 @@ echo ""
 # ==========================================
 # INFORMAÇÕES FINAIS
 # ==========================================
-
-# Função auxiliar para contar recursos com tratamento de erro
-safe_kubectl_count() {
-    local kind="$1"
-    local ns="$2"
-
-    # Desabilita -e temporariamente para capturar falhas do kubectl
-    set +e
-    local output
-    output=$(kubectl get "$kind" -n "$ns" --no-headers 2>/dev/null)
-    local status=$?
-    set -e
-
-    if [ "$status" -ne 0 ]; then
-        # kubectl falhou (ex.: namespace inexistente ou KUBECONFIG inválido)
-        echo "N/A"
-    elif [ -z "$output" ]; then
-        # Comando bem-sucedido, mas sem recursos retornados
-        echo "0"
-    else
-        printf '%s\n' "$output" | wc -l | tr -d ' '
-    fi
-}
 
 echo "======================================="
 echo "🎉 DEPLOY CONCLUÍDO!"
