@@ -4,6 +4,29 @@
 
 set -e  # Parar em caso de erro
 
+# Helper function to safely count kubectl resources
+safe_kubectl_count() {
+    local kind="$1"
+    local ns="$2"
+
+    # Temporarily disable -e to capture failures
+    set +e
+    local output
+    output=$(kubectl get "$kind" -n "$ns" --no-headers 2>/dev/null)
+    local status=$?
+    set -e
+
+    if [ "$status" -ne 0 ]; then
+        # kubectl failed (e.g., namespace doesn't exist or KUBECONFIG invalid)
+        echo "N/A"
+    elif [ -z "$output" ]; then
+        # Command succeeded but returned no resources
+        echo "0"
+    else
+        printf '%s\n' "$output" | wc -l | tr -d ' '
+    fi
+}
+
 echo "🚀 DEPLOY COM KUBECTL-AI"
 echo "======================================="
 echo ""
@@ -229,9 +252,9 @@ echo "   Namespace: $NAMESPACE"
 echo "   Manifest dir: $MANIFEST_DIR"
 echo ""
 echo "📊 RECURSOS DEPLOYADOS:"
-echo "   • Pods: $(kubectl get pods -n $NAMESPACE --no-headers | wc -l)"
-echo "   • Deployments: $(kubectl get deployments -n $NAMESPACE --no-headers | wc -l)"
-echo "   • Services: $(kubectl get svc -n $NAMESPACE --no-headers | wc -l)"
+echo "   • Pods: $(safe_kubectl_count pods "$NAMESPACE")"
+echo "   • Deployments: $(safe_kubectl_count deployments "$NAMESPACE")"
+echo "   • Services: $(safe_kubectl_count svc "$NAMESPACE")"
 echo ""
 echo "📊 ACESSO:"
 echo "   • Neo4j Browser: http://localhost:30474"
