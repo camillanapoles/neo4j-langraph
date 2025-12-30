@@ -127,6 +127,7 @@ else
 fi
 
 echo "📊 Verificando tamanho do backup..."
+BACKUP_SIZE="0"  # Default value
 if [ -f "$NEO4J_BACKUP_DIR/neo4j_$DATE" ]; then
     BACKUP_SIZE=$(du -m "$NEO4J_BACKUP_DIR/neo4j_$DATE" 2>/dev/null | cut -f1 || echo "0")
     
@@ -136,7 +137,6 @@ if [ -f "$NEO4J_BACKUP_DIR/neo4j_$DATE" ]; then
         echo "✅ Backup size: ${BACKUP_SIZE}MB"
     fi
 else
-    BACKUP_SIZE="0"
     echo "⚠️  Aviso: Não foi possível verificar o tamanho do backup"
 fi
 
