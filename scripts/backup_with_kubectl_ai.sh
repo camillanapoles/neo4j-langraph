@@ -170,7 +170,7 @@ echo ""
 echo "🔍 VERIFICANDO INTEGRIDADE DO BACKUP LOCALAI"
 echo "-----------------------------------"
 
-MODEL_COUNT=$(find "$LOCALAI_BACKUP_DIR" -type f 2>/dev/null | wc -l || echo "0")
+MODEL_COUNT=$(find "$LOCALAI_BACKUP_DIR" -type f 2>/dev/null | wc -l)
 
 if [ "$MODEL_COUNT" -eq 0 ]; then
     echo "⚠️  Nenhum modelo encontrado no backup do LocalAI"
