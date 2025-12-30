@@ -179,7 +179,7 @@ else
     echo "✅ Modelos encontrados: $MODEL_COUNT"
 fi
 
-TOTAL_SIZE=$(du -sh "$LOCALAI_BACKUP_DIR" 2>/dev/null | cut -f1 || echo "0")
+TOTAL_SIZE=$({ du -sh "$LOCALAI_BACKUP_DIR" 2>/dev/null | cut -f1; } || echo "0")
 echo "✅ Total size: $TOTAL_SIZE"
 
 echo ""
