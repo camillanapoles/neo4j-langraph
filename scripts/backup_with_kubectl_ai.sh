@@ -129,12 +129,15 @@ fi
 echo "📊 Verificando tamanho do backup..."
 BACKUP_SIZE="0"  # Default value
 if [ -f "$NEO4J_BACKUP_DIR/neo4j_$DATE" ]; then
-    BACKUP_SIZE=$(du -m "$NEO4J_BACKUP_DIR/neo4j_$DATE" 2>/dev/null | cut -f1 || echo "0")
+    BACKUP_SIZE=$(du -m "$NEO4J_BACKUP_DIR/neo4j_$DATE" 2>/dev/null | cut -f1)
     
-    if [ "$BACKUP_SIZE" -lt 10 ]; then
+    if [ -n "$BACKUP_SIZE" ] && [ "$BACKUP_SIZE" -ge 10 ] 2>/dev/null; then
+        echo "✅ Backup size: ${BACKUP_SIZE}MB"
+    elif [ -n "$BACKUP_SIZE" ]; then
         echo "⚠️  Aviso: Backup pode estar muito pequeno (${BACKUP_SIZE}MB)"
     else
-        echo "✅ Backup size: ${BACKUP_SIZE}MB"
+        BACKUP_SIZE="0"
+        echo "⚠️  Aviso: Não foi possível determinar o tamanho do backup"
     fi
 else
     echo "⚠️  Aviso: Não foi possível verificar o tamanho do backup"
@@ -179,7 +182,10 @@ else
     echo "✅ Modelos encontrados: $MODEL_COUNT"
 fi
 
-TOTAL_SIZE=$({ du -sh "$LOCALAI_BACKUP_DIR" 2>/dev/null | cut -f1; } || echo "0")
+TOTAL_SIZE=$(du -sh "$LOCALAI_BACKUP_DIR" 2>/dev/null | cut -f1)
+if [ -z "$TOTAL_SIZE" ]; then
+    TOTAL_SIZE="0"
+fi
 echo "✅ Total size: $TOTAL_SIZE"
 
 echo ""
