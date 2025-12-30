@@ -2,9 +2,11 @@
 # Script de backup automatizado com kubectl-ai
 # Backup do Neo4j e LocalAI com verificação de integridade
 
-# Não usar 'set -e' para evitar que erros não críticos interrompam o script inteiro.
-# Comandos críticos devem tratar erros explicitamente (por exemplo, com 'if ! cmd; then exit 1; fi').
-set -o pipefail
+# Usar 'set -eo pipefail' para tratamento rigoroso de erros.
+# - 'set -e' faz o script sair em erros não tratados
+# - 'set -o pipefail' faz pipelines falharem se qualquer comando falhar
+# Comandos não críticos devem redirecionar erros para /dev/null (2>/dev/null)
+set -eo pipefail
 
 echo "📦 BACKUP AUTOMATIZADO COM KUBECTL-AI"
 echo "======================================="
@@ -194,7 +196,7 @@ if ! find "$NEO4J_BACKUP_DIR" -name "neo4j_*" -mtime +$RETENTION_DAYS -delete 2>
 fi
 
 NEO4J_BACKUP_COUNT=$(find "$NEO4J_BACKUP_DIR" -name "neo4j_*" 2>/dev/null | wc -l)
-NEO4J_BACKUP_SIZE=$(du -sh "$NEO4J_BACKUP_DIR" 2>/dev/null | cut -f1 || echo "0")
+NEO4J_BACKUP_SIZE=$(du -sh "$NEO4J_BACKUP_DIR" 2>/dev/null | cut -f1)
 
 echo "✅ Clean up concluído!"
 echo "   Backups: $NEO4J_BACKUP_COUNT"
@@ -207,7 +209,7 @@ if ! find "$LOCALAI_BACKUP_DIR" -name "*_backup" -mtime +$RETENTION_DAYS -delete
 fi
 
 LOCALAI_BACKUP_COUNT=$(find "$LOCALAI_BACKUP_DIR" -type f 2>/dev/null | wc -l)
-LOCALAI_BACKUP_SIZE=$(du -sh "$LOCALAI_BACKUP_DIR" 2>/dev/null | cut -f1 || echo "0")
+LOCALAI_BACKUP_SIZE=$(du -sh "$LOCALAI_BACKUP_DIR" 2>/dev/null | cut -f1)
 
 echo "✅ Clean up concluído!"
 echo "   Models: $LOCALAI_BACKUP_COUNT"
