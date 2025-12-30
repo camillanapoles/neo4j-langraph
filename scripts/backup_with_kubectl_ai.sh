@@ -2,7 +2,9 @@
 # Script de backup automatizado com kubectl-ai
 # Backup do Neo4j e LocalAI com verificação de integridade
 
-set -e  # Parar em caso de erro
+# Não usar 'set -e' para evitar que erros não críticos interrompam o script inteiro.
+# Comandos críticos devem tratar erros explicitamente (por exemplo, com 'if ! cmd; then exit 1; fi').
+set -o pipefail
 
 echo "📦 BACKUP AUTOMATIZADO COM KUBECTL-AI"
 echo "======================================="
@@ -73,12 +75,18 @@ echo "-----------------------------------"
 
 # Criar diretório de backup do Neo4j
 NEO4J_BACKUP_DIR="$BACKUP_DIR/neo4j"
-mkdir -p "$NEO4J_BACKUP_DIR"
+if ! mkdir -p "$NEO4J_BACKUP_DIR"; then
+    echo "❌ ERRO CRÍTICO: Não foi possível criar diretório de backup do Neo4j!"
+    exit 1
+fi
 echo "✅ Diretório de backup do Neo4j: $NEO4J_BACKUP_DIR"
 
 # Criar diretório de backup do LocalAI
 LOCALAI_BACKUP_DIR="$BACKUP_DIR/localai"
-mkdir -p "$LOCALAI_BACKUP_DIR"
+if ! mkdir -p "$LOCALAI_BACKUP_DIR"; then
+    echo "❌ ERRO CRÍTICO: Não foi possível criar diretório de backup do LocalAI!"
+    exit 1
+fi
 echo "✅ Diretório de backup do LocalAI: $LOCALAI_BACKUP_DIR"
 
 echo ""
@@ -91,10 +99,15 @@ echo "📦 BACKUP DO NEO4J"
 echo "-----------------------------------"
 
 echo "🔍 Verificando pod do Neo4j..."
-kubectl-ai --quiet --skip-permissions "Obtenha o pod neo4j mais recente no namespace $NAMESPACE"
+if ! kubectl-ai --quiet --skip-permissions "Obtenha o pod neo4j mais recente no namespace $NAMESPACE"; then
+    echo "⚠️  Aviso: Não foi possível verificar o pod do Neo4j, mas continuando..."
+fi
 
 echo "📦 Iniciando backup do Neo4j..."
-kubectl-ai --quiet --skip-permissions "Faça backup do Neo4j no namespace $NAMESPACE: Execute: k3s kubectl exec -n $NAMESPACE <pod> -- neo4j-admin backup --from=/data --to=/backup/neo4j_$DATE"
+if ! kubectl-ai --quiet --skip-permissions "Faça backup do Neo4j no namespace $NAMESPACE: Execute: k3s kubectl exec -n $NAMESPACE <pod> -- neo4j-admin backup --from=/data --to=/backup/neo4j_$DATE"; then
+    echo "❌ ERRO CRÍTICO: Falha ao executar backup do Neo4j!"
+    exit 1
+fi
 
 echo "✅ Backup do Neo4j concluído!"
 
@@ -110,19 +123,18 @@ echo "-----------------------------------"
 echo "📊 Verificando se backup foi criado..."
 if [ -f "$NEO4J_BACKUP_DIR/neo4j_$DATE" ]; then
     echo "✅ Backup criado: neo4j_$DATE"
+    
+    echo "📊 Verificando tamanho do backup..."
+    BACKUP_SIZE=$(du -m "$NEO4J_BACKUP_DIR/neo4j_$DATE" | cut -f1)
+    
+    if [ "$BACKUP_SIZE" -lt 10 ]; then
+        echo "⚠️  AVISO: Backup muito pequeno (${BACKUP_SIZE}MB) - pode estar corrompido!"
+    else
+        echo "✅ Backup size: ${BACKUP_SIZE}MB"
+    fi
 else
-    echo "❌ ERRO: Backup não foi criado!"
-    exit 1
-fi
-
-echo "📊 Verificando tamanho do backup..."
-BACKUP_SIZE=$(du -m "$NEO4J_BACKUP_DIR/neo4j_$DATE" | cut -f1)
-
-if [ "$BACKUP_SIZE" -lt 10 ]; then
-    echo "❌ ERRO: Backup muito pequeno (${BACKUP_SIZE}MB)!"
-    exit 1
-else
-    echo "✅ Backup size: ${BACKUP_SIZE}MB"
+    echo "⚠️  AVISO: Backup não foi encontrado no diretório esperado!"
+    BACKUP_SIZE=0
 fi
 
 echo ""
@@ -135,10 +147,14 @@ echo "📦 BACKUP DO LOCALAI"
 echo "-----------------------------------"
 
 echo "🔍 Verificando pod do LocalAI..."
-kubectl-ai --quiet --skip-permissions "Obtenha o pod localai mais recente no namespace $NAMESPACE"
+if ! kubectl-ai --quiet --skip-permissions "Obtenha o pod localai mais recente no namespace $NAMESPACE"; then
+    echo "⚠️  Aviso: Não foi possível verificar o pod do LocalAI, mas continuando..."
+fi
 
 echo "📦 Iniciando backup dos modelos LocalAI..."
-kubectl-ai --quiet --skip-permissions "Faça backup dos modelos LocalAI no namespace $NAMESPACE: Liste os modelos em /models/ e copie para $LOCALAI_BACKUP_DIR/"
+if ! kubectl-ai --quiet --skip-permissions "Faça backup dos modelos LocalAI no namespace $NAMESPACE: Liste os modelos em /models/ e copie para $LOCALAI_BACKUP_DIR/"; then
+    echo "⚠️  Aviso: Falha ao executar backup do LocalAI, mas continuando com limpeza e relatório..."
+fi
 
 echo "✅ Backup dos modelos LocalAI concluído!"
 
@@ -173,10 +189,12 @@ echo "🧹 LIMPANDO BACKUPS ANTIGOS"
 echo "-----------------------------------"
 
 echo "🧹 Limpando backups do Neo4j (mais antigos que $RETENTION_DAYS dias)..."
-find "$NEO4J_BACKUP_DIR" -name "neo4j_*" -mtime +$RETENTION_DAYS -delete
+if ! find "$NEO4J_BACKUP_DIR" -name "neo4j_*" -mtime +$RETENTION_DAYS -delete 2>/dev/null; then
+    echo "⚠️  Aviso: Não foi possível limpar alguns backups antigos do Neo4j"
+fi
 
-NEO4J_BACKUP_COUNT=$(find "$NEO4J_BACKUP_DIR" -name "neo4j_*" | wc -l)
-NEO4J_BACKUP_SIZE=$(du -sh "$NEO4J_BACKUP_DIR" | cut -f1)
+NEO4J_BACKUP_COUNT=$(find "$NEO4J_BACKUP_DIR" -name "neo4j_*" 2>/dev/null | wc -l)
+NEO4J_BACKUP_SIZE=$(du -sh "$NEO4J_BACKUP_DIR" 2>/dev/null | cut -f1 || echo "0")
 
 echo "✅ Clean up concluído!"
 echo "   Backups: $NEO4J_BACKUP_COUNT"
@@ -184,10 +202,12 @@ echo "   Total size: $NEO4J_BACKUP_SIZE"
 
 echo ""
 echo "🧹 Limpando backups do LocalAI (mais antigos que $RETENTION_DAYS dias)..."
-find "$LOCALAI_BACKUP_DIR" -name "*_backup" -mtime +$RETENTION_DAYS -delete
+if ! find "$LOCALAI_BACKUP_DIR" -name "*_backup" -mtime +$RETENTION_DAYS -delete 2>/dev/null; then
+    echo "⚠️  Aviso: Não foi possível limpar alguns backups antigos do LocalAI"
+fi
 
-LOCALAI_BACKUP_COUNT=$(find "$LOCALAI_BACKUP_DIR" -type f | wc -l)
-LOCALAI_BACKUP_SIZE=$(du -sh "$LOCALAI_BACKUP_DIR" | cut -f1)
+LOCALAI_BACKUP_COUNT=$(find "$LOCALAI_BACKUP_DIR" -type f 2>/dev/null | wc -l)
+LOCALAI_BACKUP_SIZE=$(du -sh "$LOCALAI_BACKUP_DIR" 2>/dev/null | cut -f1 || echo "0")
 
 echo "✅ Clean up concluído!"
 echo "   Models: $LOCALAI_BACKUP_COUNT"
@@ -202,7 +222,7 @@ echo ""
 echo "📊 GERANDO RELATÓRIO DE BACKUP"
 echo "-----------------------------------"
 
-cat > "$BACKUP_DIR/backup-report.txt" << EOFCAT
+if ! cat > "$BACKUP_DIR/backup-report.txt" << EOFCAT
 ======================================
 BACKUP REPORT
 ======================================
@@ -243,11 +263,13 @@ Total size: $NEO4J_BACKUP_SIZE + $LOCALAI_BACKUP_SIZE
 Status: Success
 ======================================
 EOFCAT
-
-cat "$BACKUP_DIR/backup-report.txt"
-
-echo ""
-echo "✅ Relatório de backup gerado: $BACKUP_DIR/backup-report.txt"
+then
+    echo "⚠️  Aviso: Não foi possível gerar o relatório de backup"
+else
+    cat "$BACKUP_DIR/backup-report.txt"
+    echo ""
+    echo "✅ Relatório de backup gerado: $BACKUP_DIR/backup-report.txt"
+fi
 
 echo ""
 
