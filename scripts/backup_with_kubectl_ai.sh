@@ -2,8 +2,10 @@
 # Script de backup automatizado com kubectl-ai
 # Backup do Neo4j e LocalAI com verificação de integridade
 
-# Não usar 'set -e' para evitar que erros não críticos interrompam o script inteiro.
-# Comandos críticos devem tratar erros explicitamente (por exemplo, com 'if ! cmd; then exit 1; fi').
+# Usar 'set -eo pipefail' para tratamento rigoroso de erros.
+# - 'set -e' faz o script sair em erros não tratados
+# - 'set -o pipefail' faz pipelines falharem se qualquer comando falhar
+# Comandos não críticos devem redirecionar erros para /dev/null (2>/dev/null)
 set -eo pipefail
 
 echo "📦 BACKUP AUTOMATIZADO COM KUBECTL-AI"
